@@ -1,0 +1,5 @@
+# Exclude local configurations and private workflows containing actual credentials/webhooks
+*local*.json
+private/
+.env
+*.log

@@ -1,0 +1,168 @@
+{
+  "name": "OS EOL Notifier",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e2f073dd-eb80-4965-982d-111111111111",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days"
+            }
+          ]
+        }
+      },
+      "id": "ade1fa4d-e846-4054-982e-222222222222",
+      "name": "Schedule Trigger (Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  { json: { id: \"windows\", name: \"Windows Desktop\" } },\n  { json: { id: \"windows-server\", name: \"Windows Server\" } },\n  { json: { id: \"macos\", name: \"macOS\" } },\n  { json: { id: \"ubuntu\", name: \"Ubuntu Linux\" } },\n  { json: { id: \"debian\", name: \"Debian Linux\" } },\n  { json: { id: \"oracle-linux\", name: \"Oracle Linux\" } },\n  { json: { id: \"rocky-linux\", name: \"Rocky Linux\" } }\n];"
+      },
+      "id": "fffe87d3-6570-4cef-aaae-333333333333",
+      "name": "Init Products",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://endoflife.date/api/{{ $json.id }}.json",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "a9559e69-9f3a-4602-bc56-444444444444",
+      "name": "Fetch EOL Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        80,
+        180
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function detectProduct(item) {\n  const codename = (item.codename || \"\").toLowerCase();\n  const releaseLabel = (item.releaseLabel || \"\").toLowerCase();\n  const cycle = (item.cycle || \"\").toLowerCase();\n  const link = (item.link || \"\").toLowerCase();\n\n  if (link.includes(\"microsoft\") || link.includes(\"windows\") || releaseLabel.includes(\"windows\") || cycle.startsWith(\"10-\") || cycle.startsWith(\"11-\")) {\n    if (cycle.includes(\"server\") || releaseLabel.includes(\"server\") || [\"2025\", \"2022\", \"2019\", \"2016\", \"2012\", \"2008\", \"2003\", \"2000\"].some(yr => cycle.includes(yr))) {\n      return { id: \"windows-server\", name: \"Windows Server\" };\n    }\n    return { id: \"windows\", name: \"Windows Desktop\" };\n  }\n\n  const codenameWords = codename.split(/[\\s\\-_()]+/);\n  const macCodenames = [\"tahoe\", \"sequoia\", \"sonoma\", \"ventura\", \"monterey\", \"big\", \"sur\", \"catalina\", \"mojave\", \"high\", \"sierra\", \"el\", \"capitan\", \"yosemite\", \"mavericks\", \"mountain\", \"lion\", \"snow\", \"leopard\", \"tiger\", \"panther\", \"jaguar\", \"puma\", \"cheetah\"];\n  const debianCodenames = [\"trixie\", \"bookworm\", \"bullseye\", \"buster\", \"stretch\", \"jessie\", \"wheezy\", \"squeeze\", \"lenny\", \"etch\", \"sarge\", \"woody\", \"potato\", \"slink\", \"hamm\", \"bo\", \"rex\", \"buzz\"];\n  const ubuntuCodenames = [\"raccoon\", \"quokka\", \"puffin\", \"oriole\", \"numbat\", \"minotaur\", \"lobster\", \"kudu\", \"jellyfish\", \"indri\", \"hippo\", \"gorilla\", \"fossa\", \"ermine\", \"dingo\", \"cuttlefish\", \"beaver\", \"aardvark\", \"zapus\", \"yak\", \"xerus\", \"werewolf\", \"vervet\", \"unicorn\", \"tahr\", \"salamander\", \"ringtail\", \"quetzal\", \"pangolin\", \"ocelot\", \"narwhal\", \"meerkat\", \"lynx\", \"koala\", \"jackalope\", \"ibex\", \"heron\", \"gibbon\", \"fawn\", \"eft\", \"drake\", \"badger\", \"hedgehog\", \"warthog\"];\n\n  if (codenameWords.some(word => macCodenames.includes(word))) return { id: \"macos\", name: \"macOS\" };\n  if (codenameWords.some(word => debianCodenames.includes(word))) return { id: \"debian\", name: \"Debian Linux\" };\n  if (codenameWords.some(word => ubuntuCodenames.includes(word))) return { id: \"ubuntu\", name: \"Ubuntu Linux\" };\n\n  if (link.includes(\"debian\") || link.includes(\"debian.org\")) return { id: \"debian\", name: \"Debian Linux\" };\n  if (link.includes(\"ubuntu\") || link.includes(\"ubuntu.com\")) return { id: \"ubuntu\", name: \"Ubuntu Linux\" };\n  if (link.includes(\"apple.com\") || releaseLabel.includes(\"os x\") || releaseLabel.includes(\"mac os\")) return { id: \"macos\", name: \"macOS\" };\n  if ([\"2025\", \"2022\", \"2019\", \"2016\", \"2012\", \"2008\", \"2003\", \"2000\"].includes(cycle)) return { id: \"windows-server\", name: \"Windows Server\" };\n\n  return { id: \"unknown\", name: \"Unknown Product\" };\n}\n\nconst items = $input.all();\nconst staticData = $getWorkflowStaticData('global');\nstaticData.sentAlerts = staticData.sentAlerts || {};\n\nconst alerts = [];\nconst today = new Date();\n\nlet initProducts = [];\ntry {\n  initProducts = $('Init Products').all();\n} catch (e) {\n  // Safe fallback\n}\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  const cycleInfo = item.json;\n  \n  let productInfo = { id: \"unknown\", name: \"Unknown Product\" };\n  const detected = detectProduct(cycleInfo);\n  \n  if (detected.id !== \"unknown\") {\n    productInfo = detected;\n  } else {\n    try {\n      if (item.pairedItem && typeof item.pairedItem.item === 'number') {\n        const idx = item.pairedItem.item;\n        if (idx >= 0 && idx < initProducts.length) {\n          productInfo = initProducts[idx].json;\n        }\n      } else {\n        if (items.length === initProducts.length && i < initProducts.length) {\n          productInfo = initProducts[i].json;\n        } else if (initProducts.length > 0) {\n          productInfo = initProducts[0].json;\n        }\n      }\n    } catch (e) {\n      // Keep default fallback\n    }\n  }\n  \n  const productId = productInfo.id;\n  const productName = productInfo.name;\n  \n  const cycle = cycleInfo.cycle;\n  const releaseLabel = cycleInfo.releaseLabel || cycle;\n  const eol = cycleInfo.eol;\n  \n  if (!eol || typeof eol !== 'string') continue;\n  \n  const eolDate = new Date(eol);\n  const timeDiff = eolDate.getTime() - today.getTime();\n  const daysRemaining = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));\n  \n  let activeThreshold = null;\n  if (daysRemaining <= 7 && daysRemaining >= 0) {\n    activeThreshold = 7;\n  } else if (daysRemaining <= 30 && daysRemaining > 7) {\n    activeThreshold = 30;\n  } else if (daysRemaining <= 60 && daysRemaining > 30) {\n    activeThreshold = 60;\n  }\n  \n  if (activeThreshold !== null) {\n    const alertKey = `${productId}_${cycle}_${activeThreshold}`;\n    \n    if (!staticData.sentAlerts[alertKey]) {\n      alerts.push({\n        json: {\n          productId,\n          productName,\n          cycle,\n          releaseLabel,\n          eolDate: eol,\n          daysRemaining,\n          threshold: activeThreshold,\n          alertKey,\n          link: cycleInfo.link || `https://endoflife.date/${productId}`,\n          color: activeThreshold === 7 ? 15158332 : (activeThreshold === 30 ? 15105570 : 3447003),\n          timestamp: new Date().toISOString()\n        }\n      });\n      staticData.sentAlerts[alertKey] = true;\n    }\n  }\n}\n\nreturn alerts;"
+      },
+      "id": "86f408ac-bf8b-47f2-9bcd-555555555555",
+      "name": "Evaluate EOL State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"embeds\": [\n    {\n      \"title\": \"⚠️ OS End of Life Alert: {{ $json.productName }} ({{ $json.releaseLabel }})\",\n      \"description\": \"The cycle **{{ $json.releaseLabel }}** of **{{ $json.productName }}** is approaching its End of Life (EOL) in **{{ $json.daysRemaining }} days**.\",\n      \"color\": {{ $json.color }},\n      \"fields\": [\n        {\n          \"name\": \"Product\",\n          \"value\": \"{{ $json.productName }}\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"Version Cycle\",\n          \"value\": \"{{ $json.releaseLabel }}\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"EOL Date\",\n          \"value\": \"`{{ $json.eolDate }}`\",\n          \"inline\": true\n        },\n        {\n          \"name\": \"Days Remaining\",\n          \"value\": \"**{{ $json.daysRemaining }} days** ({{ $json.threshold }}-day warning threshold)\",\n          \"inline\": false\n        },\n        {\n          \"name\": \"Reference Link\",\n          \"value\": \"[Official Release Notes / Lifecycle Info]({{ $json.link }})\",\n          \"inline\": false\n        }\n      ],\n      \"footer\": {\n        \"text\": \"n8n Automated OS EOL Notifier\"\n      },\n      \"timestamp\": \"{{ $json.timestamp }}\"\n    }\n  ]\n}"
+      },
+      "id": "7adc1320-41f2-4b69-bc4f-666666666666",
+      "name": "Send Discord Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        560,
+        180
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Init Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger (Daily)": {
+      "main": [
+        [
+          {
+            "node": "Init Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Products": {
+      "main": [
+        [
+          {
+            "node": "Fetch EOL Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch EOL Data": {
+      "main": [
+        [
+          {
+            "node": "Evaluate EOL State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate EOL State": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e2e8e04e-e11a-4d2b-aa55-e55555555555",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
